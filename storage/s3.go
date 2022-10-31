@@ -456,10 +456,6 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 		input.Metadata["file-atime"] = aws.String(atime)
 	}
 
-	mtime := metadata.mTime()
-	if ctime != "" {
-		input.Metadata["x-amz-meta-file-mtime"] = aws.String(mtime)
-	}
 	_, err := s.api.CopyObject(input)
 	return err
 }
