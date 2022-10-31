@@ -554,7 +554,7 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 		if err != nil {
 			return err
 		}
-		err = storage.SetFileTime(dsturl.Absolute(), *obj.CreateTime, *obj.ModTime)
+		err = storage.SetFileTime(dsturl.Absolute(), *obj.AccessTime, *obj.ModTime, *obj.CreateTime)
 		if err != nil {
 			return err
 		}
@@ -609,11 +609,11 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) er
 		SetExpires(c.expires)
 
 	if c.preserveTimestamp {
-		cTime, mTime, err := storage.GetFileTime(srcurl.Absolute())
+		aTime, mTime, cTime, err := storage.GetFileTime(srcurl.Absolute())
 		if err != nil {
 			return err
 		}
-		metadata.SetPreserveTimestamp(cTime.String(), mTime.String())
+		metadata.SetPreserveTimestamp(aTime, mTime, cTime)
 	}
 
 	if c.contentType != "" {
