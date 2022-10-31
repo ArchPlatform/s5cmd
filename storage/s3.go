@@ -137,6 +137,16 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 		Size:    aws.Int64Value(output.ContentLength),
 	}
 
+	ctime := output.Metadata["x-amz-meta-file-ctime"]
+	if ctime != nil {
+		ctime_i, err := strconv.ParseInt(*ctime, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		t := time.Unix(ctime_i, 0)
+		obj.CreateTime = &t
+	}
+
 	if s.noSuchUploadRetryCount > 0 {
 		if retryID, ok := output.Metadata[metadataKeyRetryID]; ok {
 			obj.retryID = *retryID
@@ -389,6 +399,10 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 		input.Expires = aws.Time(t)
 	}
 
+	ctime := metadata.cTime()
+	if ctime != "" {
+		input.Metadata["x-amz-meta-file-ctime"] = aws.String(ctime)
+	}
 	_, err := s.api.CopyObject(input)
 	return err
 }
