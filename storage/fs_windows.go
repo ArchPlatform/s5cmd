@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+<<<<<<< HEAD
 func GetFileTime(filename string) (time.Time, time.Time, time.Time, error) {
 	fi, err := os.Stat(filename)
 	if err != nil {

@@ -169,6 +169,16 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 		obj.AccessTime = &accessTime
 	}
 
+	ctime := output.Metadata["x-amz-meta-file-ctime"]
+	if ctime != nil {
+		ctime_i, err := strconv.ParseInt(*ctime, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		t := time.Unix(ctime_i, 0)
+		obj.CreateTime = &t
+	}
+
 	if s.noSuchUploadRetryCount > 0 {
 		if retryID, ok := output.Metadata[metadataKeyRetryID]; ok {
 			obj.retryID = *retryID
