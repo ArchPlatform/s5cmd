@@ -106,6 +106,7 @@ type Object struct {
 	URL          *url.URL     `json:"key,omitempty"`
 	Etag         string       `json:"etag,omitempty"`
 	ModTime      *time.Time   `json:"last_modified,omitempty"`
+	CreateTime   *time.Time   `json:"created,omitempty"`
 	Type         ObjectType   `json:"type,omitempty"`
 	Size         int64        `json:"size,omitempty"`
 	StorageClass StorageClass `json:"storage_class,omitempty"`
@@ -233,6 +234,20 @@ func (m Metadata) Expires() string {
 
 func (m Metadata) SetExpires(expires string) Metadata {
 	m["Expires"] = expires
+	return m
+}
+
+func (m Metadata) cTime() string {
+	return m["x-amz-meta-file-ctime"]
+}
+
+func (m Metadata) mTime() string {
+	return m["x-amz-meta-file-mtime"]
+}
+
+func (m Metadata) SetPreserveTimestamp(cTime, mTime string) Metadata {
+	m["x-amz-meta-file-ctime"] = cTime
+	m["x-amz-meta-file-mtime"] = mTime
 	return m
 }
 
