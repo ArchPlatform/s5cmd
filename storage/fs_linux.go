@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func getFileTime(filename string) (time.Time, time.Time, error) {
+func GetFileTime(filename string) (time.Time, time.Time, error) {
 	fi, err := os.Stat(filename)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
@@ -22,7 +22,7 @@ func getFileTime(filename string) (time.Time, time.Time, error) {
 	return cTime, mTime, nil
 }
 
-func setFileTime(filename string, creationTime time.Time, modTime time.Time) error {
+func SetFileTime(filename string, creationTime time.Time, modTime time.Time) error {
 	err := os.Chtimes(filename, modTime, modTime)
 	if err != nil {
 		return err
