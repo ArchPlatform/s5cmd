@@ -1,4 +1,4 @@
-//go:build linux
+//go:build darwin
 
 package storage
 
@@ -15,7 +15,7 @@ func getFileTime(filename string) (time.Time, time.Time, error) {
 	}
 
 	stat := fi.Sys().(*syscall.Stat_t)
-	cTime := time.Unix(int64(stat.Ctim.Sec), int64(stat.Ctim.Nsec))
+	cTime := time.Unix(int64(stat.Ctimespec.Sec), int64(stat.Ctimespec.Nsec))
 
 	mTime := fi.ModTime()
 

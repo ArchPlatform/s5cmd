@@ -8,18 +8,18 @@ import (
 	"time"
 )
 
-func GetFileTime(filename string) (time.Time, error) {
+func GetFileTime(filename string) (time.Time, time.Time, error) {
 	fi, err := os.Stat(filename)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, time.Time{}, err
 	}
 
-	var cTime time.Time
-
 	d := fi.Sys().(*syscall.Win32FileAttributeData)
-	cTime = time.Unix(0, d.CreationTime.Nanoseconds())
+	cTime := time.Unix(0, d.CreationTime.Nanoseconds())
 
-	return cTime, nil
+	mTime := fi.ModTime()
+
+	return cTime, mTime, nil
 }
 
 func SetFileTime(filename string, creationTime time.Time, modTime time.Time) error {

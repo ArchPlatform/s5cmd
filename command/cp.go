@@ -609,11 +609,11 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) er
 		SetExpires(c.expires)
 
 	if c.preserveTimestamp {
-		cTime, err := storage.GetFileTime(srcurl.Absolute())
+		cTime, mTime, err := storage.GetFileTime(srcurl.Absolute())
 		if err != nil {
 			return err
 		}
-		metadata.SetPreserveTimestamp(cTime.String())
+		metadata.SetPreserveTimestamp(cTime.String(), mTime.String())
 	}
 
 	if c.contentType != "" {

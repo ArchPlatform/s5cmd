@@ -241,8 +241,13 @@ func (m Metadata) cTime() string {
 	return m["x-amz-meta-file-ctime"]
 }
 
-func (m Metadata) SetPreserveTimestamp(cTime string) Metadata {
+func (m Metadata) mTime() string {
+	return m["x-amz-meta-file-mtime"]
+}
+
+func (m Metadata) SetPreserveTimestamp(cTime, mTime string) Metadata {
 	m["x-amz-meta-file-ctime"] = cTime
+	m["x-amz-meta-file-mtime"] = mTime
 	return m
 }
 
