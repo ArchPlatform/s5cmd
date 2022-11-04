@@ -215,106 +215,106 @@ func NewMetadata() Metadata {
 }
 
 func (m Metadata) ACL() string {
-	return m["ACL"]
+	return m[METADATA_ACL]
 }
 
 func (m Metadata) SetACL(acl string) Metadata {
-	m["ACL"] = acl
+	m[METADATA_ACL] = acl
 	return m
 }
 
 func (m Metadata) CacheControl() string {
-	return m["CacheControl"]
+	return m[METADATA_CACHE_CONTROL]
 }
 
 func (m Metadata) SetCacheControl(cacheControl string) Metadata {
-	m["CacheControl"] = cacheControl
+	m[METADATA_CACHE_CONTROL] = cacheControl
 	return m
 }
 
 func (m Metadata) Expires() string {
-	return m["Expires"]
+	return m[METADATA_EXPIRES]
 }
 
 func (m Metadata) SetExpires(expires string) Metadata {
-	m["Expires"] = expires
+	m[METADATA_EXPIRES] = expires
 	return m
 }
 
 func (m Metadata) cTime() string {
-	return m["file-ctime"]
+	return m[METADATA_CTIME]
 }
 
 func (m Metadata) mTime() string {
-	return m["file-mtime"]
+	return m[METADATA_MTIME]
 }
 
 func (m Metadata) aTime() string {
-	return m["file-atime"]
+	return m[METADATA_ATIME]
 }
 
 func (m Metadata) SetPreserveTimestamp(aTime, mTime, cTime time.Time) Metadata {
-	m["file-ctime"] = strconv.Itoa(int(cTime.UnixNano()))
-	m["file-mtime"] = strconv.Itoa(int(mTime.UnixNano()))
-	m["file-atime"] = strconv.Itoa(int(aTime.UnixNano()))
+	m[METADATA_CTIME] = strconv.Itoa(int(cTime.UnixNano()))
+	m[METADATA_MTIME] = strconv.Itoa(int(mTime.UnixNano()))
+	m[METADATA_ATIME] = strconv.Itoa(int(aTime.UnixNano()))
 	return m
 }
 
 func (m Metadata) StorageClass() string {
-	return m["StorageClass"]
+	return m[METADATA_STORAGE_CLASS]
 }
 
 func (m Metadata) SetStorageClass(class string) Metadata {
-	m["StorageClass"] = class
+	m[METADATA_STORAGE_CLASS] = class
 	return m
 }
 
 func (m Metadata) userId() string {
-	return m["file-owner"]
+	return m[METADATA_OWNER]
 }
 
 func (m Metadata) groupId() string {
-	return m["file-group"]
+	return m[METADATA_GROUP]
 }
 
 func (m Metadata) SetPreserveOwnership(userId, groupId string) Metadata {
-	m["file-owner"] = userId
-	m["file-group"] = groupId
+	m[METADATA_OWNER] = userId
+	m[METADATA_GROUP] = groupId
 	return m
 }
 
 func (m Metadata) ContentType() string {
-	return m["ContentType"]
+	return m[METADATA_CONTENT_TYPE]
 }
 
 func (m Metadata) SetContentType(contentType string) Metadata {
-	m["ContentType"] = contentType
+	m[METADATA_CONTENT_TYPE] = contentType
 	return m
 }
 
 func (m Metadata) SSE() string {
-	return m["EncryptionMethod"]
+	return m[METADATA_ENCRYPTION_METHOD]
 }
 
 func (m Metadata) SetSSE(sse string) Metadata {
-	m["EncryptionMethod"] = sse
+	m[METADATA_ENCRYPTION_METHOD] = sse
 	return m
 }
 
 func (m Metadata) SSEKeyID() string {
-	return m["EncryptionKeyID"]
+	return m[METADTAA_ENCRYPTION_KEY_ID]
 }
 
 func (m Metadata) SetSSEKeyID(kid string) Metadata {
-	m["EncryptionKeyID"] = kid
+	m[METADTAA_ENCRYPTION_KEY_ID] = kid
 	return m
 }
 
 func (m Metadata) ContentEncoding() string {
-	return m["ContentEncoding"]
+	return m[METADATA_CONTENT_ENCODING]
 }
 
 func (m Metadata) SetContentEncoding(contentEncoding string) Metadata {
-	m["ContentEncoding"] = contentEncoding
+	m[METADATA_CONTENT_ENCODING] = contentEncoding
 	return m
 }
