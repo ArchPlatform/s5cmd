@@ -117,6 +117,7 @@ type Sync struct {
 	delete            bool
 	sizeOnly          bool
 	preserveTimestamp bool
+	preserveOwnership bool
 
 	// s3 options
 	storageOpts storage.Options
@@ -141,6 +142,7 @@ func NewSync(c *cli.Context) Sync {
 		delete:            c.Bool("delete"),
 		sizeOnly:          c.Bool("size-only"),
 		preserveTimestamp: c.Bool("preserve-timestamp"),
+		preserveOwnership: c.Bool("preserve-ownership"),
 
 		// flags
 		followSymlinks: !c.Bool("no-follow-symlinks"),
@@ -359,6 +361,9 @@ func (s Sync) planRun(
 	// try to expand given source.
 	defaultFlags := map[string]interface{}{
 		"raw": true,
+	}
+	if s.preserveTimestamp {
+		defaultFlags["preserve-ownership"] = s.preserveOwnership
 	}
 	if s.preserveTimestamp {
 		defaultFlags["preserve-timestamp"] = s.preserveTimestamp

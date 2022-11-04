@@ -129,10 +129,14 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 
 	etag := aws.StringValue(output.ETag)
 	mod := aws.TimeValue(output.LastModified)
+	userId := aws.StringValue(output.Metadata["file-owner"])
+	groupId := aws.StringValue(output.Metadata["file-group"])
 
 	obj := &Object{
 		URL:        url,
 		Etag:       strings.Trim(etag, `"`),
+		UserId:     userId,
+		GroupId:    groupId,
 		ModTime:    &mod,
 		Size:       aws.Int64Value(output.ContentLength),
 		CreateTime: &time.Time{},
@@ -420,6 +424,8 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 		}
 		input.Expires = aws.Time(t)
 	}
+	input.Metadata["file-owner"] = aws.String(metadata.userId())
+	input.Metadata["file-group"] = aws.String(metadata.groupId())
 
 	ctime := metadata.cTime()
 	if ctime != "" {

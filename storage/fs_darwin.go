@@ -4,6 +4,7 @@ package storage
 
 import (
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -40,6 +41,41 @@ func SetFileTime(filename string, accessTime, modificationTime, creationTime tim
 		}
 	}
 	err = os.Chtimes(filename, accessTime, modificationTime)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// GetFileUserGroup will take a filename and return the userId and groupId associated with it.
+//   On windows this is in the format of a SID, on linux/darwin this is in the format of a UID/GID.
+func GetFileUserGroup(filename string) (username, group string, err error) {
+	info, err := os.Stat(filename)
+	if err != nil {
+		return "", "", err
+	}
+
+	stat := info.Sys().(*syscall.Stat_t)
+
+	username := strconv.Itoa(stat.Uid)
+	group := strconv.Itoa(stat.Gid)
+	return username, group, nil
+}
+
+// SetFileUserGroup will set the UserId and GroupId on a filename.
+//   If the UserId/GroupId format does not match the platform, it will return an InvalidOwnershipFormatError.
+// Windows expects the UserId/GroupId to be in SID format, Linux and Darwin expect it in UID/GID format.
+func SetFileUserGroup(filename, uid, gid string) error {
+	uidI, err := strconv.Atoi(uid)
+	if err != nil && strings.Contains(err.Error(), "") {
+		return err
+	}
+	gidI, err := strconv.Atoi(gid)
+	if err != nil {
+		return err
+	}
+
+	err = os.Lchown(filename, uidI, gidI)
 	if err != nil {
 		return err
 	}
