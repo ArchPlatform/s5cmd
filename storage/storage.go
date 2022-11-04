@@ -109,6 +109,8 @@ type Object struct {
 	AccessTime   *time.Time   `json:"accessed,omitempty"`
 	ModTime      *time.Time   `json:"last_modified,omitempty"`
 	CreateTime   *time.Time   `json:"created,omitempty"`
+	UserId       string       `json:"uid,omitempty"`
+	GroupId      string       `json:"gid,omitempty"`
 	Type         ObjectType   `json:"type,omitempty"`
 	Size         int64        `json:"size,omitempty"`
 	StorageClass StorageClass `json:"storage_class,omitempty"`
@@ -264,6 +266,20 @@ func (m Metadata) StorageClass() string {
 
 func (m Metadata) SetStorageClass(class string) Metadata {
 	m["StorageClass"] = class
+	return m
+}
+
+func (m Metadata) userId() string {
+	return m["file-owner"]
+}
+
+func (m Metadata) groupId() string {
+	return m["file-group"]
+}
+
+func (m Metadata) SetPreserveOwnership(userId, groupId string) Metadata {
+	m["file-owner"] = userId
+	m["file-group"] = groupId
 	return m
 }
 
