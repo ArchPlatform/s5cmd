@@ -59,6 +59,12 @@ Examples:
 
 	10. Sync all files to S3 bucket but exclude the ones with txt and gz extension
 		 > s5cmd {{.HelpName}} --exclude "*.txt" --exclude "*.gz" dir/ s3://bucket
+
+	11. Upload a folder to S3 preserving the ownership of files
+         > s5cmd {{.HelpName}} --preserve-ownership dir/ s3://bucket
+
+	12. Download a folder from S3 preserving the ownership it was originally uplaoded with
+		 > s5cmd {{.HelpName}} --preserve-ownership s3://bucket/ dir
 `
 
 func NewSyncCommandFlags() []cli.Flag {
@@ -117,6 +123,7 @@ type Sync struct {
 	delete            bool
 	sizeOnly          bool
 	preserveTimestamp bool
+	preserveOwnership bool
 
 	// s3 options
 	storageOpts storage.Options
@@ -141,6 +148,7 @@ func NewSync(c *cli.Context) Sync {
 		delete:            c.Bool("delete"),
 		sizeOnly:          c.Bool("size-only"),
 		preserveTimestamp: c.Bool("preserve-timestamp"),
+		preserveOwnership: c.Bool("preserve-ownership"),
 
 		// flags
 		followSymlinks: !c.Bool("no-follow-symlinks"),
@@ -359,6 +367,9 @@ func (s Sync) planRun(
 	// try to expand given source.
 	defaultFlags := map[string]interface{}{
 		"raw": true,
+	}
+	if s.preserveOwnership {
+		defaultFlags["preserve-ownership"] = s.preserveOwnership
 	}
 	if s.preserveTimestamp {
 		defaultFlags["preserve-timestamp"] = s.preserveTimestamp

@@ -129,10 +129,14 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 
 	etag := aws.StringValue(output.ETag)
 	mod := aws.TimeValue(output.LastModified)
+	userId := aws.StringValue(output.Metadata["file-owner"])
+	groupId := aws.StringValue(output.Metadata["file-group"])
 
 	obj := &Object{
 		URL:        url,
 		Etag:       strings.Trim(etag, `"`),
+		UserId:     userId,
+		GroupId:    groupId,
 		ModTime:    &mod,
 		Size:       aws.Int64Value(output.ContentLength),
 		CreateTime: &time.Time{},
@@ -145,7 +149,7 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		creationTime := time.Unix(0, ctime)
+		creationTime := time.Unix(0, ctime).UTC()
 		obj.CreateTime = &creationTime
 	}
 
@@ -155,7 +159,7 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		modificationTime := time.Unix(0, mtime)
+		modificationTime := time.Unix(0, mtime).UTC()
 		obj.ModTime = &modificationTime
 	}
 
@@ -165,28 +169,8 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		accessTime := time.Unix(0, atime)
+		accessTime := time.Unix(0, atime).UTC()
 		obj.AccessTime = &accessTime
-	}
-
-	ctime := output.Metadata["x-amz-meta-file-ctime"]
-	if ctime != nil {
-		ctime_i, err := strconv.ParseInt(*ctime, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		t := time.Unix(ctime_i, 0)
-		obj.CreateTime = &t
-	}
-
-	mtime := output.Metadata["x-amz-meta-file-mtime"]
-	if mtime != nil {
-		mtime_i, err := strconv.ParseInt(*mtime, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		t := time.Unix(mtime_i, 0)
-		obj.ModTime = &t
 	}
 
 	if s.noSuchUploadRetryCount > 0 {
@@ -406,6 +390,7 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 		Key:          aws.String(to.Path),
 		CopySource:   aws.String(copySource),
 		RequestPayer: s.RequestPayer(),
+		Metadata:     make(map[string]*string),
 	}
 
 	storageClass := metadata.StorageClass()
@@ -440,6 +425,8 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 		}
 		input.Expires = aws.Time(t)
 	}
+	input.Metadata["file-owner"] = aws.String(metadata.userId())
+	input.Metadata["file-group"] = aws.String(metadata.groupId())
 
 	ctime := metadata.cTime()
 	if ctime != "" {
@@ -634,6 +621,16 @@ func (s *S3) Put(
 	atime := metadata.aTime()
 	if ctime != "" {
 		input.Metadata["file-atime"] = aws.String(atime)
+	}
+
+	userId := metadata.userId()
+	if userId != "" {
+		input.Metadata["file-owner"] = aws.String(userId)
+	}
+
+	groupId := metadata.groupId()
+	if groupId != "" {
+		input.Metadata["file-group"] = aws.String(groupId)
 	}
 
 	sseEncryption := metadata.SSE()
