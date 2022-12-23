@@ -406,6 +406,9 @@ func (s Sync) planRun(
 
 	// only in destination
 	if s.delete && len(onlyDest) > 0 {
+		delete(defaultFlags, "preserve-ownership")
+		delete(defaultFlags, "preserve-timestamp")
+
 		command, err := generateCommand(c, "rm", defaultFlags, onlyDest...)
 		if err != nil {
 			printDebug(s.op, err, onlyDest...)
