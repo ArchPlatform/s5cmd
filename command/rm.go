@@ -201,7 +201,7 @@ func validateRMCommand(c *cli.Context) error {
 	)
 	for i, srcurl := range srcurls {
 		// we don't operate on S3 prefixes for copy and delete operations.
-		if srcurl.IsBucket() || srcurl.IsPrefix() {
+		if srcurl.IsBucket() {
 			return fmt.Errorf("s3 bucket/prefix cannot be used for delete operations (forgot wildcard character?)")
 		}
 

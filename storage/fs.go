@@ -120,7 +120,7 @@ func walkDir(ctx context.Context, fs *Filesystem, src *url.URL, followSymlinks b
 		Callback: func(pathname string, dirent *godirwalk.Dirent) error {
 			// we're interested in files
 			if dirent.IsDir() {
-				return nil
+				pathname += string(os.PathSeparator)
 			}
 
 			fileurl, err := url.New(pathname)
@@ -219,6 +219,24 @@ func (f *Filesystem) Create(path string) (*os.File, error) {
 	}
 
 	return os.Create(path)
+}
+
+func (f *Filesystem) CreateDir(
+	ctx context.Context,
+	to *url.URL,
+	metadata Metadata,
+) error {
+	if f.dryRun {
+		return nil
+	}
+	if _, err := os.Stat(to.Absolute()); err != nil {
+		if os.IsNotExist(err) {
+			return os.Mkdir(to.Absolute(), os.ModePerm)
+		} else {
+			return err
+		}
+	}
+	return nil
 }
 
 // Open opens the given source.

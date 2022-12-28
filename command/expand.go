@@ -23,7 +23,7 @@ func expandSource(
 	// if the source is local, we send a Stat call to know if  we have
 	// directory or file to walk. For remote storage, we don't want to send
 	// Stat since it doesn't have any folder semantics.
-	if !srcurl.IsWildcard() && !srcurl.IsRemote() {
+	if !srcurl.IsWildcard() {
 		obj, err := client.Stat(ctx, srcurl)
 		if err != nil {
 			return nil, err

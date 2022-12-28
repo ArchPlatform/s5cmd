@@ -49,6 +49,10 @@ const (
 
 	// the key of the object metadata which is used to handle retry decision on NoSuchUpload error
 	metadataKeyRetryID = "s5cmd-upload-retry-id"
+
+	// the ETag of an empty object. Should be used to assume folders.
+	//   Limitation being we can't have zero width objects
+	folderETag = "d41d8cd98f00b204e9800998ecf8427e"
 )
 
 // Re-used AWS sessions dramatically improve performance.
@@ -143,6 +147,9 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 		AccessTime: &time.Time{},
 	}
 
+	if strings.Trim(etag, `"`) == folderETag && strings.HasSuffix(url.Absolute(), "/") {
+		obj.Type = ObjectType{mode: os.ModeDir}
+	}
 	cTimeS := aws.StringValue(output.Metadata["file-ctime"])
 	if cTimeS != "" {
 		ctime, err := strconv.ParseInt(cTimeS, 10, 64)
@@ -236,7 +243,7 @@ func (s *S3) listObjectsV2(ctx context.Context, url *url.URL) <-chan *Object {
 
 			for _, c := range p.Contents {
 				key := aws.StringValue(c.Key)
-				if !url.Match(key) {
+				if !url.Match(key) && key != url.Path {
 					continue
 				}
 
@@ -554,6 +561,114 @@ func (s *S3) Select(ctx context.Context, url *url.URL, query *SelectQuery, resul
 	}
 
 	return resp.EventStream.Reader.Err()
+}
+
+var emptyDirPath string
+
+func getEmptyDirFile() (*os.File, error) {
+	if emptyDirPath == "" {
+		os.TempDir()
+		file, err := os.CreateTemp(os.TempDir(), "s5cmd_tmp")
+		if err != nil {
+			return nil, err
+		}
+		emptyDirPath = file.Name()
+		return file, nil
+	}
+	return os.Open(emptyDirPath)
+}
+
+func (s *S3) CreateDir(
+	ctx context.Context,
+	to *url.URL,
+	metadata Metadata,
+) error {
+
+	file, err := getEmptyDirFile()
+	if err != nil {
+		return err
+	}
+	path := to.Path
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	input := &s3.PutObjectInput{
+		Bucket:       aws.String(to.Bucket),
+		Key:          aws.String(path),
+		Metadata:     make(map[string]*string),
+		RequestPayer: s.RequestPayer(),
+		Body:         file,
+	}
+
+	storageClass := metadata.StorageClass()
+	if storageClass != "" {
+		input.StorageClass = aws.String(storageClass)
+	}
+	acl := metadata.ACL()
+	if acl != "" {
+		input.ACL = aws.String(acl)
+	}
+
+	cacheControl := metadata.CacheControl()
+	if cacheControl != "" {
+		input.CacheControl = aws.String(cacheControl)
+	}
+
+	expires := metadata.Expires()
+	if expires != "" {
+		t, err := time.Parse(time.RFC3339, expires)
+		if err != nil {
+			return err
+		}
+		input.Expires = aws.Time(t)
+	}
+
+	ctime := metadata.cTime()
+	if ctime != "" {
+		input.Metadata["file-ctime"] = aws.String(ctime)
+	}
+
+	mtime := metadata.mTime()
+	if ctime != "" {
+		input.Metadata["file-mtime"] = aws.String(mtime)
+	}
+
+	atime := metadata.aTime()
+	if ctime != "" {
+		input.Metadata["file-atime"] = aws.String(atime)
+	}
+
+	userId := metadata.userId()
+	if userId != "" {
+		input.Metadata["file-owner"] = aws.String(userId)
+	}
+
+	groupId := metadata.groupId()
+	if groupId != "" {
+		input.Metadata["file-group"] = aws.String(groupId)
+	}
+
+	sseEncryption := metadata.SSE()
+	if sseEncryption != "" {
+		input.ServerSideEncryption = aws.String(sseEncryption)
+		sseKmsKeyID := metadata.SSEKeyID()
+		if sseKmsKeyID != "" {
+			input.SSEKMSKeyId = aws.String(sseKmsKeyID)
+		}
+	}
+
+	contentEncoding := metadata.ContentEncoding()
+	if contentEncoding != "" {
+		input.ContentEncoding = aws.String(contentEncoding)
+	}
+
+	// add retry ID to the object metadata
+	if s.noSuchUploadRetryCount > 0 {
+		input.Metadata[metadataKeyRetryID] = generateRetryID()
+	}
+
+	_, err = s.api.PutObjectWithContext(ctx, input)
+	return err
 }
 
 // Put is a multipart upload operation to upload resources, which implements

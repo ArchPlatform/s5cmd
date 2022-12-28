@@ -53,18 +53,38 @@ func SetFileTime(filename string, accessTime, modificationTime, creationTime tim
 	mft := syscall.NsecToFiletime(modificationTime.UnixNano())
 	cft := syscall.NsecToFiletime(creationTime.UnixNano())
 
-	fd, err := syscall.Open(filename, os.O_RDWR, 0775)
+	var fd syscall.Handle
+	fi, err := os.Stat(filename)
+	if fi.IsDir() {
+		fd, err = getDirectoryHandle(filename)
+	} else {
+		fd, err = syscall.Open(filename, os.O_RDWR, 0775)
+	}
 	if err != nil {
 		return err
 	}
-	err = syscall.SetFileTime(fd, &cft, &aft, &mft)
-
 	defer syscall.Close(fd)
+	err = syscall.SetFileTime(fd, &cft, &aft, &mft)
 
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func getDirectoryHandle(filename string) (syscall.Handle, error) {
+	pathp, err := syscall.UTF16PtrFromString(filename)
+	if err != nil {
+		return syscall.InvalidHandle, err
+	}
+
+	h, e := syscall.CreateFile(pathp,
+		syscall.FILE_WRITE_ATTRIBUTES, syscall.FILE_SHARE_WRITE, nil,
+		syscall.OPEN_EXISTING, syscall.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if e != nil {
+		return syscall.InvalidHandle, e
+	}
+	return h, nil
 }
 
 // GetFileUserGroup will take a filename and return the userId and groupId associated with it.

@@ -426,6 +426,10 @@ func generateDestinationURL(srcurl, dsturl *url.URL, isBatch bool) *url.URL {
 		objname = srcurl.Relative()
 	}
 
+	if strings.HasSuffix(srcurl.Absolute(), "/") && !strings.HasSuffix(objname, "/") {
+		objname += "/"
+	}
+
 	if dsturl.IsRemote() {
 		if dsturl.IsPrefix() || dsturl.IsBucket() {
 			return dsturl.Join(objname)
@@ -439,7 +443,7 @@ func generateDestinationURL(srcurl, dsturl *url.URL, isBatch bool) *url.URL {
 
 // shouldSkipObject checks is object should be skipped.
 func (s Sync) shouldSkipObject(object *storage.Object, verbose bool) bool {
-	if object.Type.IsDir() || errorpkg.IsCancelation(object.Err) {
+	if errorpkg.IsCancelation(object.Err) {
 		return true
 	}
 
