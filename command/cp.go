@@ -117,8 +117,14 @@ Examples:
 	25. Upload a file to S3 preserving the timestamp on disk
 		 > s5cmd --preserve-timestamp myfile.css.br s3://bucket/
 
-	26. Download a file from S3 preserving the timestamp it was originally uplaoded with
+	26. Download a file from S3 preserving the timestamp it was originally uploaded with
 		 > s5cmd --preserve-timestamp s3://bucket/myfile.css.br myfile.css.br
+
+	27. Upload a file to S3 preserving the ownership of files
+		 > s5cmd --preserve-ownership myfile.css.br s3://bucket/
+
+	28. Download a file from S3 preserving the ownership it was originally uploaded with
+		 > s5cmd --preserve-ownership s3://bucket/myfile.css.br myfile.css.br
 
 `
 
@@ -217,6 +223,10 @@ func NewSharedFlags() []cli.Flag {
 		&cli.BoolFlag{
 			Name:  "preserve-timestamp",
 			Usage: "preserve the timestamp on disk while uploading and set the timestamp from s3 while downloading.",
+		},
+		&cli.BoolFlag{
+			Name:  "preserve-ownership",
+			Usage: "preserve the ownership (owner/group) on disk while uploading and set the ownership from s3 while downloading.",
 		},
 	}
 }
@@ -318,6 +328,7 @@ type Copy struct {
 	metadata              map[string]string
 	showProgress          bool
 	preserveTimestamp     bool
+	preserveOwnership     bool
 	progressbar           progressbar.ProgressBar
 
 	// patterns
@@ -397,6 +408,7 @@ func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 		showProgress:          c.Bool("show-progress"),
 		progressbar:           commandProgressBar,
 		preserveTimestamp:     c.Bool("preserve-timestamp"),
+		preserveOwnership:     c.Bool("preserve-ownership"),
 
 		// region settings
 		srcRegion: c.String("source-region"),
@@ -661,6 +673,31 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 		return err
 	}
 
+	if c.preserveOwnership {
+		obj, err := srcClient.Stat(ctx, srcurl)
+		if err != nil {
+			return err
+		}
+		// SetFileUserGroup may return an InvalidOwnershipFormatError which signifies that it cannot
+		//		understand the UserID or GroupID format.
+		// This is most common when a file is being ported across windows/linux.
+		// We aren't implementing a fix for it here, just a note that it cannot be resolved.
+		err = storage.SetFileUserGroup(dsturl.Absolute(), obj.UserID, obj.GroupID)
+		if err != nil {
+			invalidOwnershipFormat := &storage.InvalidOwnershipFormatError{}
+			if errors.As(err, &invalidOwnershipFormat) {
+				msg := log.ErrorMessage{
+					Operation: c.op,
+					Command:   c.fullCommand,
+					Err:       fmt.Sprintf("UserID: %s or GroupID: %s are not valid on this operating system.", obj.UserID, obj.GroupID),
+				}
+				log.Debug(msg)
+			}
+
+			return err
+		}
+	}
+
 	if c.preserveTimestamp {
 		obj, err := srcClient.Stat(ctx, srcurl)
 		if err != nil {
@@ -732,6 +769,14 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 			return err
 		}
 		storage.SetMetadataTimestamp(&metadata, aTime, mTime, cTime)
+	}
+
+	if c.preserveOwnership {
+		userID, groupID, err := storage.GetFileUserGroup(srcurl.Absolute())
+		if err != nil {
+			return err
+		}
+		storage.SetMetadataOwnership(&metadata, userID, groupID)
 	}
 
 	if c.contentType != "" {

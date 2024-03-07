@@ -114,6 +114,8 @@ type Object struct {
 	AccessTime   *time.Time   `json:"accessed,omitempty"`
 	ModTime      *time.Time   `json:"last_modified,omitempty"`
 	CreateTime   *time.Time   `json:"created,omitempty"`
+	UserID       string       `json:"uid,omitempty"`
+	GroupID      string       `json:"gid,omitempty"`
 	Type         ObjectType   `json:"type,omitempty"`
 	Size         int64        `json:"size,omitempty"`
 	StorageClass StorageClass `json:"storage_class,omitempty"`
@@ -235,6 +237,8 @@ type Metadata struct {
 	FileCtime          string
 	FileMtime          string
 	FileAtime          string
+	FileUID            string
+	FileGID            string
 
 	UserDefined map[string]string
 }
@@ -243,6 +247,11 @@ func SetMetadataTimestamp(m *Metadata, aTime, mTime, cTime time.Time) {
 	m.FileCtime = strconv.Itoa(int(cTime.UnixNano()))
 	m.FileMtime = strconv.Itoa(int(mTime.UnixNano()))
 	m.FileAtime = strconv.Itoa(int(aTime.UnixNano()))
+}
+
+func SetMetadataOwnership(m *Metadata, userID, groupID string) {
+	m.FileUID = userID
+	m.FileGID = groupID
 }
 
 func (o Object) ToBytes() []byte {

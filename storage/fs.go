@@ -12,6 +12,14 @@ import (
 	"github.com/peak/s5cmd/v2/storage/url"
 )
 
+type InvalidOwnershipFormatError struct {
+	Err error
+}
+
+func (e *InvalidOwnershipFormatError) Error() string {
+	return fmt.Sprintf("InvalidOwnershipFormatError: %v\n", e.Err)
+}
+
 // Filesystem is the Storage implementation of a local filesystem.
 type Filesystem struct {
 	dryRun bool

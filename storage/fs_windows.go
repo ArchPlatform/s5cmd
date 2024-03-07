@@ -3,7 +3,10 @@
 package storage
 
 import (
+	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -61,4 +64,86 @@ func SetFileTime(filename string, accessTime, modificationTime, creationTime tim
 		return err
 	}
 	return nil
+}
+
+// GetFileUserGroup will take a filename and return the userId and groupId associated with it.
+//
+//	On windows this is in the format of a SID, on linux/darwin this is in the format of a UID/GID.
+func GetFileUserGroup(filename string) (userId, groupId string, err error) {
+	sd, err := windows.GetNamedSecurityInfo(filename, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION)
+	if err != nil {
+		return "", "", err
+	}
+
+	userSID, _, err := sd.Owner()
+	groupSID, _, err := sd.Group()
+
+	userId = userSID.String()
+	groupId = groupSID.String()
+
+	return userId, groupId, nil
+}
+
+// SetFileUserGroup will set the UserId and GroupId on a filename.
+//
+//	If the UserId/GroupId format does not match the platform, it will return an InvalidOwnershipFormatError.
+//
+// Windows expects the UserId/GroupId to be in SID format, Linux and Darwin expect it in UID/GID format.
+func SetFileUserGroup(filename, userId, groupId string) error {
+	var err error
+	privileges := []string{"SeRestorePrivilege", "SeTakeOwnershipPrivilege"}
+	if err := winio.EnableProcessPrivileges(privileges); err != nil {
+		return err
+	}
+	defer winio.DisableProcessPrivileges(privileges)
+
+	var uidSid *windows.SID
+	var gidSid *windows.SID
+	if userId != "" {
+		uidSid, err = StringAsSid(userId)
+		if err != nil {
+			return err
+		}
+	}
+
+	if groupId != "" {
+		gidSid, err = StringAsSid(groupId)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = windows.SetNamedSecurityInfo(filename, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, uidSid, gidSid, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func StringAsSid(principal string) (*windows.SID, error) {
+	sid, err := windows.StringToSid(principal)
+	if err != nil {
+		if strings.Contains(err.Error(), "The security ID structure is invalid.") {
+			sid, _, _, err = windows.LookupSID("", principal)
+			if err != nil {
+				return nil, &InvalidOwnershipFormatError{Err: err}
+			}
+		} else {
+			return nil, &InvalidOwnershipFormatError{Err: err}
+		}
+	}
+	return sid, nil
+}
+
+func StringSidAsName(strSID string) (name string, err error) {
+	sid, err := StringAsSid(strSID)
+	if err != nil {
+		return "", err
+	}
+	name, _, _, err = sid.LookupAccount("")
+	if err != nil {
+		return "", err
+	}
+	return name, nil
 }
