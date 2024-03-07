@@ -112,7 +112,14 @@ Examples:
 		 > s5cmd {{.HelpName}} --version-id VERSION_ID s3://bucket/prefix/object .
 
 	24. Pass arbitrary metadata to the object during upload or copy 
-		 > s5cmd {{.HelpName}} --metadata "camera=Nixon D750" --metadata "imageSize=6032x4032" flowers.png s3://bucket/prefix/flowers.png 
+		 > s5cmd {{.HelpName}} --metadata "camera=Nixon D750" --metadata "imageSize=6032x4032" flowers.png s3://bucket/prefix/flowers.png
+
+	25. Upload a file to S3 preserving the timestamp on disk
+		 > s5cmd --preserve-timestamp myfile.css.br s3://bucket/
+
+	26. Download a file from S3 preserving the timestamp it was originally uplaoded with
+		 > s5cmd --preserve-timestamp s3://bucket/myfile.css.br myfile.css.br
+
 `
 
 func NewSharedFlags() []cli.Flag {
@@ -206,6 +213,10 @@ func NewSharedFlags() []cli.Flag {
 			Usage:       "number of times that a request will be retried on NoSuchUpload error; you should not use this unless you really know what you're doing",
 			DefaultText: "0",
 			Hidden:      true,
+		},
+		&cli.BoolFlag{
+			Name:  "preserve-timestamp",
+			Usage: "preserve the timestamp on disk while uploading and set the timestamp from s3 while downloading.",
 		},
 	}
 }
@@ -306,6 +317,7 @@ type Copy struct {
 	contentDisposition    string
 	metadata              map[string]string
 	showProgress          bool
+	preserveTimestamp     bool
 	progressbar           progressbar.ProgressBar
 
 	// patterns
@@ -384,6 +396,7 @@ func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 		metadata:              metadata,
 		showProgress:          c.Bool("show-progress"),
 		progressbar:           commandProgressBar,
+		preserveTimestamp:     c.Bool("preserve-timestamp"),
 
 		// region settings
 		srcRegion: c.String("source-region"),
@@ -648,6 +661,17 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 		return err
 	}
 
+	if c.preserveTimestamp {
+		obj, err := srcClient.Stat(ctx, srcurl)
+		if err != nil {
+			return err
+		}
+		err = storage.SetFileTime(dsturl.Absolute(), *obj.AccessTime, *obj.ModTime, *obj.CreateTime)
+		if err != nil {
+			return err
+		}
+	}
+
 	if !c.showProgress {
 		msg := log.InfoMessage{
 			Operation:   c.op,
@@ -700,6 +724,14 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 		ContentDisposition: c.contentDisposition,
 		EncryptionMethod:   c.encryptionMethod,
 		EncryptionKeyID:    c.encryptionKeyID,
+	}
+
+	if c.preserveTimestamp {
+		aTime, mTime, cTime, err := storage.GetFileTime(srcurl.Absolute())
+		if err != nil {
+			return err
+		}
+		storage.SetMetadataTimestamp(&metadata, aTime, mTime, cTime)
 	}
 
 	if c.contentType != "" {

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/lanrat/extsort"
@@ -110,7 +111,9 @@ func (o *Options) SetRegion(region string) {
 type Object struct {
 	URL          *url.URL     `json:"key,omitempty"`
 	Etag         string       `json:"etag,omitempty"`
+	AccessTime   *time.Time   `json:"accessed,omitempty"`
 	ModTime      *time.Time   `json:"last_modified,omitempty"`
+	CreateTime   *time.Time   `json:"created,omitempty"`
 	Type         ObjectType   `json:"type,omitempty"`
 	Size         int64        `json:"size,omitempty"`
 	StorageClass StorageClass `json:"storage_class,omitempty"`
@@ -229,8 +232,17 @@ type Metadata struct {
 	ContentDisposition string
 	EncryptionMethod   string
 	EncryptionKeyID    string
+	FileCtime          string
+	FileMtime          string
+	FileAtime          string
 
 	UserDefined map[string]string
+}
+
+func SetMetadataTimestamp(m *Metadata, aTime, mTime, cTime time.Time) {
+	m.FileCtime = strconv.Itoa(int(cTime.UnixNano()))
+	m.FileMtime = strconv.Itoa(int(mTime.UnixNano()))
+	m.FileAtime = strconv.Itoa(int(aTime.UnixNano()))
 }
 
 func (o Object) ToBytes() []byte {
