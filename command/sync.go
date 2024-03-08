@@ -515,7 +515,9 @@ func (s Sync) planRun(
 				return
 			}
 
-			command, err := generateCommand(c, "rm", defaultFlags, dstURLs...)
+			removeFlags := defaultFlags
+			delete(removeFlags, "preserve-timestamp")
+			command, err := generateCommand(c, "rm", removeFlags, dstURLs...)
 			if err != nil {
 				printDebug(s.op, err, dstURLs...)
 				return
