@@ -523,6 +523,7 @@ func (s Sync) planRun(
 
 			removeFlags := defaultFlags
 			delete(removeFlags, "preserve-timestamp")
+			delete(removeFlags, "preserve-ownership")
 			command, err := generateCommand(c, "rm", removeFlags, dstURLs...)
 			if err != nil {
 				printDebug(s.op, err, dstURLs...)
