@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"fmt"
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 	"os"
@@ -90,6 +91,13 @@ func GetFileUserGroup(filename string) (userId, groupId string, err error) {
 //
 // Windows expects the UserId/GroupId to be in SID format, Linux and Darwin expect it in UID/GID format.
 func SetFileUserGroup(filename, userId, groupId string) error {
+	if userId == "" || groupId == "" {
+		return &InvalidOwnershipFormatError{
+			Err: fmt.Errorf(
+				"invalid userID or groupID for file: \"%s\", \"%s\" (%s)", userId, groupId, filename,
+			),
+		}
+	}
 	var err error
 	privileges := []string{"SeRestorePrivilege", "SeTakeOwnershipPrivilege"}
 	if err := winio.EnableProcessPrivileges(privileges); err != nil {
