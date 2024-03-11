@@ -128,9 +128,11 @@ type Sync struct {
 	fullCommand string
 
 	// flags
-	delete      bool
-	sizeOnly    bool
-	exitOnError bool
+	delete            bool
+	sizeOnly          bool
+	exitOnError       bool
+	preserveTimestamp bool
+	preserveOwnership bool
 
 	// s3 options
 	storageOpts storage.Options
@@ -152,9 +154,11 @@ func NewSync(c *cli.Context) Sync {
 		fullCommand: commandFromContext(c),
 
 		// flags
-		delete:      c.Bool("delete"),
-		sizeOnly:    c.Bool("size-only"),
-		exitOnError: c.Bool("exit-on-error"),
+		delete:            c.Bool("delete"),
+		sizeOnly:          c.Bool("size-only"),
+		exitOnError:       c.Bool("exit-on-error"),
+		preserveTimestamp: c.Bool("preserve-timestamp"),
+		preserveOwnership: c.Bool("preserve-ownership"),
 
 		// flags
 		followSymlinks: !c.Bool("no-follow-symlinks"),
@@ -451,6 +455,14 @@ func (s Sync) planRun(
 		"raw": true,
 	}
 
+	if s.preserveOwnership {
+		defaultFlags["preserve-ownership"] = s.preserveOwnership
+	}
+
+	if s.preserveTimestamp {
+		defaultFlags["preserve-timestamp"] = s.preserveTimestamp
+	}
+
 	// it should wait until both of the child goroutines for onlySource and common channels
 	// are completed before closing the WriteCloser w to ensure that all URLs are processed.
 	var wg sync.WaitGroup
@@ -509,7 +521,10 @@ func (s Sync) planRun(
 				return
 			}
 
-			command, err := generateCommand(c, "rm", defaultFlags, dstURLs...)
+			removeFlags := defaultFlags
+			delete(removeFlags, "preserve-timestamp")
+			delete(removeFlags, "preserve-ownership")
+			command, err := generateCommand(c, "rm", removeFlags, dstURLs...)
 			if err != nil {
 				printDebug(s.op, err, dstURLs...)
 				return
@@ -535,6 +550,10 @@ func generateDestinationURL(srcurl, dsturl *url.URL, isBatch bool) *url.URL {
 		objname = srcurl.Relative()
 	}
 
+	if strings.HasSuffix(srcurl.Absolute(), "/") && !strings.HasSuffix(objname, "/") {
+		objname += "/"
+	}
+
 	if dsturl.IsRemote() {
 		if dsturl.IsPrefix() || dsturl.IsBucket() {
 			return dsturl.Join(objname)
@@ -548,7 +567,7 @@ func generateDestinationURL(srcurl, dsturl *url.URL, isBatch bool) *url.URL {
 
 // shouldSkipObject checks is object should be skipped.
 func (s Sync) shouldSkipObject(object *storage.Object, verbose bool) bool {
-	if object.Type.IsDir() || errorpkg.IsCancelation(object.Err) {
+	if errorpkg.IsCancelation(object.Err) {
 		return true
 	}
 

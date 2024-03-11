@@ -3,6 +3,7 @@ module github.com/peak/s5cmd/v2
 go 1.19
 
 require (
+	github.com/Microsoft/go-winio v0.6.1
 	github.com/aws/aws-sdk-go v1.44.256
 	github.com/cheggaaa/pb/v3 v3.1.4
 	github.com/golang/mock v1.6.0
@@ -15,6 +16,7 @@ require (
 	github.com/lanrat/extsort v1.0.0
 	github.com/termie/go-shutil v0.0.0-20140729215957-bcacb06fecae
 	github.com/urfave/cli/v2 v2.11.2
+	golang.org/x/sys v0.7.0
 	gotest.tools/v3 v3.0.3
 )
 
@@ -36,8 +38,8 @@ require (
 	github.com/shabbyrobe/gocovmerge v0.0.0-20190829150210-3e036491d500 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
+	golang.org/x/mod v0.10.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.7.0 // indirect
 	golang.org/x/tools v0.8.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/mgo.v2 v2.0.0-20180705113604-9856a29383ce // indirect
