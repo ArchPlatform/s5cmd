@@ -50,6 +50,10 @@ const (
 
 	// the key of the object metadata which is used to handle retry decision on NoSuchUpload error
 	metadataKeyRetryID = "s5cmd-upload-retry-id"
+
+	// the ETag of an empty object. Should be used to assume folders.
+	//   Limitation being we can't have zero width objects
+	folderETag = "d41d8cd98f00b204e9800998ecf8427e"
 )
 
 // Re-used AWS sessions dramatically improve performance.
@@ -135,12 +139,52 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 
 	etag := aws.StringValue(output.ETag)
 	mod := aws.TimeValue(output.LastModified)
+	userID := aws.StringValue(output.Metadata["file-owner"])
+	groupID := aws.StringValue(output.Metadata["file-group"])
 
 	obj := &Object{
-		URL:     url,
-		Etag:    strings.Trim(etag, `"`),
-		ModTime: &mod,
-		Size:    aws.Int64Value(output.ContentLength),
+		URL:        url,
+		Etag:       strings.Trim(etag, `"`),
+		ModTime:    &mod,
+		Size:       aws.Int64Value(output.ContentLength),
+		CreateTime: &time.Time{},
+		AccessTime: &time.Time{},
+		UserID:     userID,
+		GroupID:    groupID,
+	}
+
+	if strings.Trim(etag, `"`) == folderETag && strings.HasSuffix(url.Absolute(), "/") {
+		obj.Type = ObjectType{mode: os.ModeDir}
+	}
+
+	cTimeS := aws.StringValue(output.Metadata["file-ctime"])
+	if cTimeS != "" {
+		ctime, err := strconv.ParseInt(cTimeS, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		creationTime := time.Unix(0, ctime)
+		obj.CreateTime = &creationTime
+	}
+
+	mTimeS := aws.StringValue(output.Metadata["file-mtime"])
+	if mTimeS != "" {
+		mtime, err := strconv.ParseInt(mTimeS, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		modificationTime := time.Unix(0, mtime)
+		obj.ModTime = &modificationTime
+	}
+
+	aTimeS := aws.StringValue(output.Metadata["file-atime"])
+	if aTimeS != "" {
+		atime, err := strconv.ParseInt(aTimeS, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		accessTime := time.Unix(0, atime)
+		obj.AccessTime = &accessTime
 	}
 
 	if s.noSuchUploadRetryCount > 0 {
@@ -339,7 +383,7 @@ func (s *S3) listObjectsV2(ctx context.Context, url *url.URL) <-chan *Object {
 
 			for _, c := range p.Contents {
 				key := aws.StringValue(c.Key)
-				if !url.Match(key) {
+				if !url.Match(key) && key != url.Path {
 					continue
 				}
 
@@ -550,6 +594,24 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 	if s.noSuchUploadRetryCount > 0 {
 		input.Metadata[metadataKeyRetryID] = generateRetryID()
 	}
+
+	ctime := metadata.FileCtime
+	if ctime != "" {
+		input.Metadata["file-ctime"] = aws.String(ctime)
+	}
+
+	mtime := metadata.FileMtime
+	if ctime != "" {
+		input.Metadata["file-mtime"] = aws.String(mtime)
+	}
+
+	atime := metadata.FileAtime
+	if ctime != "" {
+		input.Metadata["file-atime"] = aws.String(atime)
+	}
+
+	input.Metadata["file-owner"] = aws.String(metadata.FileUID)
+	input.Metadata["file-group"] = aws.String(metadata.FileGID)
 
 	if len(metadata.UserDefined) != 0 {
 		m := make(map[string]*string)
@@ -787,6 +849,128 @@ func (s *S3) Select(ctx context.Context, url *url.URL, query *SelectQuery, resul
 	return resp.EventStream.Reader.Err()
 }
 
+var emptyDirPath string
+
+func getEmptyDirFile() (*os.File, error) {
+	if emptyDirPath == "" {
+		os.TempDir()
+		file, err := os.CreateTemp(os.TempDir(), "s5cmd_tmp")
+		if err != nil {
+			return nil, err
+		}
+		emptyDirPath = file.Name()
+		return file, nil
+	}
+	return os.Open(emptyDirPath)
+}
+
+func (s *S3) CreateDir(
+	ctx context.Context,
+	to *url.URL,
+	metadata Metadata,
+) error {
+
+	file, err := getEmptyDirFile()
+	if err != nil {
+		return err
+	}
+	path := to.Path
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	input := &s3.PutObjectInput{
+		Bucket:       aws.String(to.Bucket),
+		Key:          aws.String(path),
+		Metadata:     make(map[string]*string),
+		RequestPayer: s.RequestPayer(),
+		Body:         file,
+	}
+
+	storageClass := metadata.StorageClass
+	if storageClass != "" {
+		input.StorageClass = aws.String(storageClass)
+	}
+
+	acl := metadata.ACL
+	if acl != "" {
+		input.ACL = aws.String(acl)
+	}
+
+	cacheControl := metadata.CacheControl
+	if cacheControl != "" {
+		input.CacheControl = aws.String(cacheControl)
+	}
+
+	expires := metadata.Expires
+	if expires != "" {
+		t, err := time.Parse(time.RFC3339, expires)
+		if err != nil {
+			return err
+		}
+		input.Expires = aws.Time(t)
+	}
+
+	sseEncryption := metadata.EncryptionMethod
+	if sseEncryption != "" {
+		input.ServerSideEncryption = aws.String(sseEncryption)
+		sseKmsKeyID := metadata.EncryptionKeyID
+		if sseKmsKeyID != "" {
+			input.SSEKMSKeyId = aws.String(sseKmsKeyID)
+		}
+	}
+
+	contentEncoding := metadata.ContentEncoding
+	if contentEncoding != "" {
+		input.ContentEncoding = aws.String(contentEncoding)
+	}
+
+	contentDisposition := metadata.ContentDisposition
+	if contentDisposition != "" {
+		input.ContentDisposition = aws.String(contentDisposition)
+	}
+
+	// add retry ID to the object metadata
+	if s.noSuchUploadRetryCount > 0 {
+		input.Metadata[metadataKeyRetryID] = generateRetryID()
+	}
+
+	ctime := metadata.FileCtime
+	if ctime != "" {
+		input.Metadata["file-ctime"] = aws.String(ctime)
+	}
+
+	mtime := metadata.FileMtime
+	if ctime != "" {
+		input.Metadata["file-mtime"] = aws.String(mtime)
+	}
+
+	atime := metadata.FileAtime
+	if ctime != "" {
+		input.Metadata["file-atime"] = aws.String(atime)
+	}
+
+	userID := metadata.FileUID
+	if userID != "" {
+		input.Metadata["file-owner"] = aws.String(userID)
+	}
+
+	groupID := metadata.FileGID
+	if groupID != "" {
+		input.Metadata["file-group"] = aws.String(groupID)
+	}
+
+	if len(metadata.UserDefined) != 0 {
+		m := make(map[string]*string)
+		for k, v := range metadata.UserDefined {
+			m[k] = aws.String(v)
+		}
+		input.Metadata = m
+	}
+
+	_, err = s.api.PutObjectWithContext(ctx, input)
+	return err
+}
+
 // Put is a multipart upload operation to upload resources, which implements
 // io.Reader interface, into S3 destination.
 func (s *S3) Put(
@@ -861,6 +1045,31 @@ func (s *S3) Put(
 	// add retry ID to the object metadata
 	if s.noSuchUploadRetryCount > 0 {
 		input.Metadata[metadataKeyRetryID] = generateRetryID()
+	}
+
+	ctime := metadata.FileCtime
+	if ctime != "" {
+		input.Metadata["file-ctime"] = aws.String(ctime)
+	}
+
+	mtime := metadata.FileMtime
+	if ctime != "" {
+		input.Metadata["file-mtime"] = aws.String(mtime)
+	}
+
+	atime := metadata.FileAtime
+	if ctime != "" {
+		input.Metadata["file-atime"] = aws.String(atime)
+	}
+
+	fileUID := metadata.FileUID
+	if fileUID != "" {
+		input.Metadata["file-owner"] = aws.String(fileUID)
+	}
+
+	fileGID := metadata.FileGID
+	if fileGID != "" {
+		input.Metadata["file-group"] = aws.String(fileGID)
 	}
 
 	if len(metadata.UserDefined) != 0 {

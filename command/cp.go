@@ -112,7 +112,20 @@ Examples:
 		 > s5cmd {{.HelpName}} --version-id VERSION_ID s3://bucket/prefix/object .
 
 	24. Pass arbitrary metadata to the object during upload or copy 
-		 > s5cmd {{.HelpName}} --metadata "camera=Nixon D750" --metadata "imageSize=6032x4032" flowers.png s3://bucket/prefix/flowers.png 
+		 > s5cmd {{.HelpName}} --metadata "camera=Nixon D750" --metadata "imageSize=6032x4032" flowers.png s3://bucket/prefix/flowers.png
+
+	25. Upload a file to S3 preserving the timestamp on disk
+		 > s5cmd --preserve-timestamp myfile.css.br s3://bucket/
+
+	26. Download a file from S3 preserving the timestamp it was originally uploaded with
+		 > s5cmd --preserve-timestamp s3://bucket/myfile.css.br myfile.css.br
+
+	27. Upload a file to S3 preserving the ownership of files
+		 > s5cmd --preserve-ownership myfile.css.br s3://bucket/
+
+	28. Download a file from S3 preserving the ownership it was originally uploaded with
+		 > s5cmd --preserve-ownership s3://bucket/myfile.css.br myfile.css.br
+
 `
 
 func NewSharedFlags() []cli.Flag {
@@ -206,6 +219,14 @@ func NewSharedFlags() []cli.Flag {
 			Usage:       "number of times that a request will be retried on NoSuchUpload error; you should not use this unless you really know what you're doing",
 			DefaultText: "0",
 			Hidden:      true,
+		},
+		&cli.BoolFlag{
+			Name:  "preserve-timestamp",
+			Usage: "preserve the timestamp on disk while uploading and set the timestamp from s3 while downloading.",
+		},
+		&cli.BoolFlag{
+			Name:  "preserve-ownership",
+			Usage: "preserve the ownership (owner/group) on disk while uploading and set the ownership from s3 while downloading.",
 		},
 	}
 }
@@ -306,6 +327,8 @@ type Copy struct {
 	contentDisposition    string
 	metadata              map[string]string
 	showProgress          bool
+	preserveTimestamp     bool
+	preserveOwnership     bool
 	progressbar           progressbar.ProgressBar
 
 	// patterns
@@ -384,6 +407,8 @@ func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 		metadata:              metadata,
 		showProgress:          c.Bool("show-progress"),
 		progressbar:           commandProgressBar,
+		preserveTimestamp:     c.Bool("preserve-timestamp"),
+		preserveOwnership:     c.Bool("preserve-ownership"),
 
 		// region settings
 		srcRegion: c.String("source-region"),
@@ -466,11 +491,11 @@ func (c Copy) Run(ctx context.Context) error {
 	}
 
 	for object := range objch {
-		if errorpkg.IsCancelation(object.Err) || object.Type.IsDir() {
+		if errorpkg.IsCancelation(object.Err) {
 			continue
 		}
 
-		if !object.Type.IsRegular() {
+		if !object.Type.IsRegular() && !object.Type.IsDir() {
 			err := fmt.Errorf("object '%v' is not a regular file", object)
 			merrorObjects = multierror.Append(merrorObjects, err)
 			printError(c.fullCommand, c.op, err)
@@ -516,7 +541,7 @@ func (c Copy) Run(ctx context.Context) error {
 		case srcurl.Type == c.dst.Type: // local->local or remote->remote
 			task = c.prepareCopyTask(ctx, srcurl, c.dst, isBatch, c.metadata)
 		case srcurl.IsRemote(): // remote->local
-			task = c.prepareDownloadTask(ctx, srcurl, c.dst, isBatch)
+			task = c.prepareDownloadTask(ctx, srcurl, c.dst, isBatch, object.Type.IsDir())
 		case c.dst.IsRemote(): // local->remote
 			task = c.prepareUploadTask(ctx, srcurl, c.dst, isBatch, c.metadata)
 		default:
@@ -558,9 +583,10 @@ func (c Copy) prepareDownloadTask(
 	srcurl *url.URL,
 	dsturl *url.URL,
 	isBatch bool,
+	srcIsDir bool,
 ) func() error {
 	return func() error {
-		dsturl, err := prepareLocalDestination(ctx, srcurl, dsturl, c.flatten, isBatch, c.storageOpts)
+		dsturl, err := prepareLocalDestination(ctx, srcurl, dsturl, c.flatten, isBatch, c.storageOpts, srcIsDir)
 		if err != nil {
 			return err
 		}
@@ -619,33 +645,87 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 		}
 		return err
 	}
+	// Check to see if the source is a directory for locally creation a directory too
+	srcObj, err := srcClient.Stat(ctx, srcurl)
+	if err != nil {
+		var objNotFound *storage.ErrGivenObjectNotFound
+		if !errors.As(err, &objNotFound) {
+			return err
+		}
+
+	}
 
 	dstPath := filepath.Dir(dsturl.Absolute())
 	dstFile := filepath.Base(dsturl.Absolute())
-	file, err := dstClient.CreateTemp(dstPath, dstFile)
-	if err != nil {
-		return err
-	}
 
-	writer := newCountingReaderWriter(file, c.progressbar)
-	size, err := srcClient.Get(ctx, srcurl, writer, c.concurrency, c.partSize)
-	file.Close()
-
-	if err != nil {
-		dErr := dstClient.Delete(ctx, &url.URL{Path: file.Name(), Type: dsturl.Type})
-		if dErr != nil {
-			printDebug(c.op, dErr, srcurl, dsturl)
+	isDir := srcObj.Type.IsDir()
+	var size int64 = 0
+	if isDir {
+		err = dstClient.CreateDir(ctx, dsturl.Absolute(), storage.Metadata{})
+		if err != nil {
+			return err
 		}
-		return err
+	} else {
+		file, err := dstClient.CreateTemp(dstPath, dstFile)
+		if err != nil {
+			return err
+		}
+
+		writer := newCountingReaderWriter(file, c.progressbar)
+		size, err = srcClient.Get(ctx, srcurl, writer, c.concurrency, c.partSize)
+
+		file.Close()
+		if err != nil {
+			dErr := dstClient.Delete(ctx, &url.URL{Path: file.Name(), Type: dsturl.Type})
+			if dErr != nil {
+				printDebug(c.op, dErr, srcurl, dsturl)
+			}
+			return err
+		}
+		err = dstClient.Rename(file, dsturl.Absolute())
+		if err != nil {
+			return err
+		}
 	}
 
 	if c.deleteSource {
 		_ = srcClient.Delete(ctx, srcurl)
 	}
 
-	err = dstClient.Rename(file, dsturl.Absolute())
-	if err != nil {
-		return err
+	if c.preserveOwnership {
+		obj, err := srcClient.Stat(ctx, srcurl)
+		if err != nil {
+			return err
+		}
+		// SetFileUserGroup may return an InvalidOwnershipFormatError which signifies that it cannot
+		//		understand the UserID or GroupID format.
+		// This is most common when a file is being ported across windows/linux.
+		// We aren't implementing a fix for it here, just a note that it cannot be resolved.
+		err = storage.SetFileUserGroup(dsturl.Absolute(), obj.UserID, obj.GroupID)
+		if err != nil {
+			invalidOwnershipFormat := &storage.InvalidOwnershipFormatError{}
+			if errors.As(err, &invalidOwnershipFormat) {
+				msg := log.ErrorMessage{
+					Operation: c.op,
+					Command:   c.fullCommand,
+					Err:       fmt.Sprintf("UserID: %s or GroupID: %s are not valid on this operating system.", obj.UserID, obj.GroupID),
+				}
+				log.Debug(msg)
+			}
+
+			return err
+		}
+	}
+
+	if c.preserveTimestamp {
+		obj, err := srcClient.Stat(ctx, srcurl)
+		if err != nil {
+			return err
+		}
+		err = storage.SetFileTime(dsturl.Absolute(), *obj.AccessTime, *obj.ModTime, *obj.CreateTime)
+		if err != nil {
+			return err
+		}
 	}
 
 	if !c.showProgress {
@@ -702,6 +782,22 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 		EncryptionKeyID:    c.encryptionKeyID,
 	}
 
+	if c.preserveTimestamp {
+		aTime, mTime, cTime, err := storage.GetFileTime(srcurl.Absolute())
+		if err != nil {
+			return err
+		}
+		storage.SetMetadataTimestamp(&metadata, aTime, mTime, cTime)
+	}
+
+	if c.preserveOwnership {
+		userID, groupID, err := storage.GetFileUserGroup(srcurl.Absolute())
+		if err != nil {
+			return err
+		}
+		storage.SetMetadataOwnership(&metadata, userID, groupID)
+	}
+
 	if c.contentType != "" {
 		metadata.ContentType = c.contentType
 	} else {
@@ -709,7 +805,15 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 	}
 
 	reader := newCountingReaderWriter(file, c.progressbar)
-	err = dstClient.Put(ctx, reader, dsturl, metadata, c.concurrency, c.partSize)
+	fi, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if fi.IsDir() {
+		err = dstClient.CreateDir(ctx, dsturl, metadata)
+	} else {
+		err = dstClient.Put(ctx, reader, dsturl, metadata, c.concurrency, c.partSize)
+	}
 
 	if err != nil {
 		return err
@@ -880,6 +984,10 @@ func prepareRemoteDestination(
 		objname = srcurl.Relative()
 	}
 
+	if objname == "." {
+		return dsturl
+	}
+
 	if dsturl.IsPrefix() || dsturl.IsBucket() {
 		dsturl = dsturl.Join(objname)
 	}
@@ -895,6 +1003,7 @@ func prepareLocalDestination(
 	flatten bool,
 	isBatch bool,
 	storageOpts storage.Options,
+	srcIsDir bool,
 ) (*url.URL, error) {
 	objname := srcurl.Base()
 	if isBatch && !flatten {
@@ -931,11 +1040,11 @@ func prepareLocalDestination(
 		if err != nil {
 			return nil, err
 		}
-		if strings.HasSuffix(dsturl.Absolute(), "/") {
+		if strings.HasSuffix(dsturl.Absolute(), "/") && !srcIsDir {
 			dsturl = dsturl.Join(objname)
 		}
 	} else {
-		if obj.Type.IsDir() {
+		if obj.Type.IsDir() && !srcIsDir {
 			dsturl = obj.URL.Join(objname)
 		}
 	}
@@ -981,7 +1090,7 @@ func validateCopyCommand(c *cli.Context) error {
 	}
 
 	// we don't operate on S3 prefixes for copy and delete operations.
-	if srcurl.IsBucket() || srcurl.IsPrefix() {
+	if srcurl.IsBucket() {
 		return fmt.Errorf("source argument must contain wildcard character")
 	}
 
@@ -1028,6 +1137,10 @@ func validateUpload(ctx context.Context, srcurl, dsturl *url.URL, storageOpts st
 	obj, err := srcclient.Stat(ctx, srcurl)
 	if err != nil {
 		return err
+	}
+
+	if obj.Type.IsDir() {
+		return nil
 	}
 
 	// 'cp dir/ s3://bucket/prefix-without-slash': expect a trailing slash to
