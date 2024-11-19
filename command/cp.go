@@ -439,7 +439,7 @@ func (c Copy) Run(ctx context.Context) error {
 		case srcurl.Type == dsturl.Type: // local->local or remote->remote
 			task = c.prepareCopyTask(ctx, srcurl, dsturl, isBatch)
 		case srcurl.IsRemote(): // remote->local
-			task = c.prepareDownloadTask(ctx, srcurl, dsturl, isBatch)
+			task = c.prepareDownloadTask(ctx, srcurl, dsturl, isBatch, waiter)
 		case dsturl.IsRemote(): // local->remote
 			task = c.prepareUploadTask(ctx, srcurl, dsturl, isBatch)
 		default:
@@ -481,13 +481,14 @@ func (c Copy) prepareDownloadTask(
 	srcurl *url.URL,
 	dsturl *url.URL,
 	isBatch bool,
+	waiter *parallel.Waiter,
 ) func() error {
 	return func() error {
 		dsturl, err := prepareLocalDestination(ctx, srcurl, dsturl, c.flatten, isBatch, c.storageOpts)
 		if err != nil {
 			return err
 		}
-		err = c.doDownload(ctx, srcurl, dsturl)
+		err = c.doDownload(ctx, srcurl, dsturl, waiter)
 		if err != nil {
 			return &errorpkg.Error{
 				Op:  c.op,
@@ -522,7 +523,7 @@ func (c Copy) prepareUploadTask(
 }
 
 // doDownload is used to fetch a remote object and save as a local object.
-func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) error {
+func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, waiter *parallel.Waiter) error {
 	srcClient, err := storage.NewRemoteClient(ctx, srcurl, c.storageOpts)
 	if err != nil {
 		return err
@@ -545,7 +546,7 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 		return err
 	}
 
-	size, err := srcClient.Get(ctx, srcurl, file, c.concurrency, c.partSize)
+	size, metadata, err := srcClient.Get(ctx, srcurl, file, c.concurrency, c.partSize)
 	if err != nil {
 		// file must be closed before deletion
 		file.Close()
@@ -562,7 +563,7 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 	}
 
 	if c.preserveOwnership || c.preserveTimestamp {
-		obj, err := srcClient.Stat(ctx, srcurl)
+		obj, err := srcClient.MetadataStat(metadata)
 		if err != nil {
 			return err
 		}
@@ -587,6 +588,14 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 			}
 		}
 		if c.preserveTimestamp {
+			// modTime is time.Time
+
+			msg := log.DebugMessage{
+				Operation: "",
+				Command:   c.fullCommand,
+				Err:       fmt.Sprintf("Setting modification time: %s - userId: %s ", obj.ModTime, obj.UserId),
+			}
+			log.Debug(msg)
 			err = storage.SetFileTime(dsturl.Absolute(), *obj.AccessTime, *obj.ModTime, *obj.CreateTime)
 			if err != nil {
 				return err

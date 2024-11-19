@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"net/http"
 	urlpkg "net/url"
 	"os"
@@ -32,9 +33,120 @@ import (
 
 	"github.com/peak/s5cmd/log"
 	"github.com/peak/s5cmd/storage/url"
+
+	"golang.org/x/net/http2"
 )
 
 var sentinelURL = urlpkg.URL{}
+
+type HTTPClientSettings struct {
+	Connect          time.Duration
+	ConnKeepAlive    time.Duration
+	ExpectContinue   time.Duration
+	IdleConn         time.Duration
+	MaxAllIdleConns  int
+	MaxHostIdleConns int
+	ResponseHeader   time.Duration
+	TLSHandshake     time.Duration
+}
+
+func NewHTTPClientWithSettings(httpSettings HTTPClientSettings) (*http.Client, error) {
+	var client http.Client
+	tr := &http.Transport{
+		ResponseHeaderTimeout: httpSettings.ResponseHeader,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			KeepAlive: httpSettings.ConnKeepAlive,
+			DualStack: true,
+			Timeout:   httpSettings.Connect,
+		}).DialContext,
+		MaxIdleConns:          httpSettings.MaxAllIdleConns,
+		IdleConnTimeout:       httpSettings.IdleConn,
+		TLSHandshakeTimeout:   httpSettings.TLSHandshake,
+		MaxIdleConnsPerHost:   httpSettings.MaxHostIdleConns,
+		ExpectContinueTimeout: httpSettings.ExpectContinue,
+	}
+
+	// So client makes HTTP/2 requests
+	err := http2.ConfigureTransport(tr)
+	if err != nil {
+		return &client, err
+	}
+
+	return &http.Client{
+		Transport: tr,
+	}, nil
+}
+
+type CustomS3Client struct {
+	s3iface.S3API
+	metadata sync.Map
+}
+
+// GetObjectWithContext is our custom method to intercept calls and log them
+func (c *CustomS3Client) GetObjectWithContext(ctx context.Context, input *s3.GetObjectInput, opts ...request.Option) (*s3.GetObjectOutput, error) {
+	// Forward the request to the original GetObjectWithContext method
+	result, err := c.S3API.GetObjectWithContext(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := log.DebugMessage{
+		Operation: "",
+		Command:   "Wrapped GetObjectWithContext called",
+		Err:       fmt.Sprintf("key: %v, instance: %p, range: %v", *input.Key, c, *input.Range),
+	}
+	log.Debug(msg)
+
+	// Store metadata in the sync.Map
+	if result.Metadata != nil {
+
+		msg := log.DebugMessage{
+			Operation: "",
+			Command:   "Storingmetadata",
+			Err:       fmt.Sprintf("metadata: %v", result.Metadata),
+		}
+		log.Debug(msg)
+		c.metadata.Store(*input.Key, result.Metadata)
+
+		//test if we can retrieve the metadata
+		if value, ok := c.metadata.Load(*input.Key); ok {
+			result := value.(map[string]*string)
+
+			msg := log.DebugMessage{
+				Operation: "",
+				Command:   "Retrieving metadata",
+				Err:       fmt.Sprintf("metadata: %v", result),
+			}
+			log.Debug(msg)
+		}
+	}
+
+	return result, nil
+}
+
+// GetMetadata retrieves metadata for a given key
+func (c *CustomS3Client) GetMetadata(key string) (map[string]*string, bool) {
+
+	msg := log.DebugMessage{
+		Operation: "",
+		Command:   key,
+		Err:       fmt.Sprintf("GetMetadata called on instance: %p\n", c),
+	}
+	log.Debug(msg)
+	if value, ok := c.metadata.Load(*aws.String(key)); ok {
+		result := value.(map[string]*string)
+
+		msg := log.DebugMessage{
+			Operation: "",
+			Command:   key,
+			Err:       fmt.Sprintf("metadata: %v", result),
+		}
+		log.Debug(msg)
+		return result, true
+	}
+	return nil, false
+}
 
 const (
 	// deleteObjectsMax is the max allowed objects to be deleted on single HTTP
@@ -59,6 +171,7 @@ var globalSessionCache = &SessionCache{
 // S3 is a storage type which interacts with S3API, DownloaderAPI and
 // UploaderAPI.
 type S3 struct {
+	customApi              *CustomS3Client
 	api                    s3iface.S3API
 	downloader             s3manageriface.DownloaderAPI
 	uploader               s3manageriface.UploaderAPI
@@ -89,6 +202,20 @@ func parseEndpoint(endpoint string) (urlpkg.URL, error) {
 	return *u, nil
 }
 
+func newDownloader(client s3iface.S3API, options ...func(*s3manager.Downloader)) *s3manager.Downloader {
+	d := &s3manager.Downloader{
+		S3:             client,
+		PartSize:       1024 * 1024 * 5,
+		Concurrency:    5,
+		BufferProvider: defaultDownloadBufferProvider(),
+	}
+	for _, option := range options {
+		option(d)
+	}
+
+	return d
+}
+
 // NewS3Storage creates new S3 session.
 func newS3Storage(ctx context.Context, opts Options) (*S3, error) {
 	endpointURL, err := parseEndpoint(opts.Endpoint)
@@ -101,9 +228,13 @@ func newS3Storage(ctx context.Context, opts Options) (*S3, error) {
 		return nil, err
 	}
 
+	standardS3 := s3.New(awsSession)
+	customS3 := &CustomS3Client{S3API: standardS3}
+
 	return &S3{
-		api:                    s3.New(awsSession),
-		downloader:             s3manager.NewDownloader(awsSession),
+		api:                    customS3,
+		customApi:              customS3,
+		downloader:             newDownloader(customS3),
 		uploader:               s3manager.NewUploader(awsSession),
 		endpointURL:            endpointURL,
 		dryRun:                 opts.DryRun,
@@ -111,6 +242,53 @@ func newS3Storage(ctx context.Context, opts Options) (*S3, error) {
 		requestPayer:           opts.RequestPayer,
 		noSuchUploadRetryCount: opts.NoSuchUploadRetryCount,
 	}, nil
+}
+
+// MetadataStat transforms metadata into an Stat like object.
+func (s *S3) MetadataStat(metadata map[string]*string) (*Object, error) {
+
+	userId := aws.StringValue(metadata["file-owner"])
+	groupId := aws.StringValue(metadata["file-group"])
+
+	obj := &Object{
+		UserId:     userId,
+		GroupId:    groupId,
+		ModTime:    &time.Time{},
+		CreateTime: &time.Time{},
+		AccessTime: &time.Time{},
+	}
+
+	cTimeS := aws.StringValue(metadata["file-ctime"])
+	if cTimeS != "" {
+		ctime, err := strconv.ParseInt(cTimeS, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		creationTime := time.Unix(0, ctime).UTC()
+		obj.CreateTime = &creationTime
+	}
+
+	mTimeS := aws.StringValue(metadata["file-mtime"])
+	if mTimeS != "" {
+		mtime, err := strconv.ParseInt(mTimeS, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		modificationTime := time.Unix(0, mtime).UTC()
+		obj.ModTime = &modificationTime
+	}
+
+	aTimeS := aws.StringValue(metadata["file-atime"])
+	if aTimeS != "" {
+		atime, err := strconv.ParseInt(aTimeS, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		accessTime := time.Unix(0, atime).UTC()
+		obj.AccessTime = &accessTime
+	}
+
+	return obj, nil
 }
 
 // Stat retrieves metadata from S3 object without returning the object itself.
@@ -468,12 +646,12 @@ func (s *S3) Get(
 	to io.WriterAt,
 	concurrency int,
 	partSize int64,
-) (int64, error) {
+) (int64, map[string]*string, error) {
 	if s.dryRun {
-		return 0, nil
+		return 0, nil, nil
 	}
 
-	return s.downloader.DownloadWithContext(ctx, to, &s3.GetObjectInput{
+	size, err := s.downloader.DownloadWithContext(ctx, to, &s3.GetObjectInput{
 		Bucket:       aws.String(from.Bucket),
 		Key:          aws.String(from.Path),
 		RequestPayer: s.RequestPayer(),
@@ -481,6 +659,12 @@ func (s *S3) Get(
 		u.PartSize = partSize
 		u.Concurrency = concurrency
 	})
+
+	metadata, _ := s.customApi.GetMetadata(from.Path)
+
+	// metadata := s.downloader.GetMetadata()
+
+	return size, metadata, err
 }
 
 type SelectQuery struct {
@@ -959,6 +1143,23 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 	}
 
 	var httpClient *http.Client
+
+	// httpClient, err := NewHTTPClientWithSettings(HTTPClientSettings{
+	// 	Connect:          5 * time.Second,
+	// 	ExpectContinue:   1 * time.Second,
+	// 	IdleConn:         10 * time.Second,
+	// 	ConnKeepAlive:    10 * time.Second,
+	// 	MaxAllIdleConns:  500,
+	// 	MaxHostIdleConns: 100,
+	// 	ResponseHeader:   5 * time.Second,
+	// 	TLSHandshake:     5 * time.Second,
+	// })
+	// if err != nil {
+	// 	fmt.Println("Got an error creating custom HTTP client:")
+	// 	fmt.Println(err)
+	// 	return nil, err
+	// }
+
 	if opts.NoVerifySSL {
 		httpClient = insecureHTTPClient
 	}
@@ -1084,6 +1285,15 @@ func (c *customRetryer) ShouldRetry(req *request.Request) bool {
 	shouldRetry := errHasCode(req.Error, "InternalError") || errHasCode(req.Error, "RequestTimeTooSkewed") || errHasCode(req.Error, "SlowDown") || strings.Contains(req.Error.Error(), "connection reset") || strings.Contains(req.Error.Error(), "connection timed out")
 	if !shouldRetry {
 		shouldRetry = c.DefaultRetryer.ShouldRetry(req)
+	}
+
+	// detect windows connection reset error
+	if strings.Contains(req.Error.Error(), "An existing connection was forcibly closed by the remote host") {
+		shouldRetry = true
+	}
+
+	if strings.Contains(req.Error.Error(), "A connection attempt failed because the connected party did not properly respond") {
+		shouldRetry = true
 	}
 
 	// Errors related to tokens

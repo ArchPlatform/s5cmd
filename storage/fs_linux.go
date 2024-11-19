@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"github.com/peak/s5cmd/parallel"
 	"os"
 	"strconv"
 	"syscall"
@@ -67,7 +68,7 @@ func GetFileUserGroup(filename string) (userId, groupId string, err error) {
 // SetFileUserGroup will set the UserId and GroupId on a filename.
 //   If the UserId/GroupId format does not match the platform, it will return an InvalidOwnershipFormatError.
 // Windows expects the UserId/GroupId to be in SID format, Linux and Darwin expect it in UID/GID format.
-func SetFileUserGroup(filename, userId, groupId string) error {
+func SetFileUserGroup(filename, userId, groupId string, waiter *Waiter) error {
 	uid, err := strconv.Atoi(userId)
 	if err != nil {
 		return &InvalidOwnershipFormatError{Err: err}

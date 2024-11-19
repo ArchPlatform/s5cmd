@@ -22,7 +22,12 @@ func (e *InvalidOwnershipFormatError) Error() string {
 
 // Filesystem is the Storage implementation of a local filesystem.
 type Filesystem struct {
-	dryRun bool
+	dryRun   bool
+	metadata map[string]*string
+}
+
+func (f *Filesystem) SetMetadata(metadata map[string]*string) {
+	f.metadata = metadata
 }
 
 // Stat returns the Object structure describing object.
