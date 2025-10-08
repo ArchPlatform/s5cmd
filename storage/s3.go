@@ -207,7 +207,7 @@ func newDownloader(client s3iface.S3API, options ...func(*s3manager.Downloader))
 		S3:             client,
 		PartSize:       1024 * 1024 * 5,
 		Concurrency:    5,
-		BufferProvider: defaultDownloadBufferProvider(),
+		BufferProvider: s3manager.NewPooledBufferedWriterReadFromProvider(1024 * 1024),
 	}
 	for _, option := range options {
 		option(d)
