@@ -1,7 +1,10 @@
 before:
   hooks:
-    - GOOS=windows GOARCH=amd64 make build
-    
+    - make build
+  env:
+    - GOOS=windows
+    - GOARCH=amd64
+
 builds:
   -
     binary: s5cmd
