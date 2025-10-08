@@ -1,6 +1,7 @@
 before:
   hooks:
-    - make build
+    - GOOS=windows GOARCH=amd64 make build
+    
 builds:
   -
     binary: s5cmd
