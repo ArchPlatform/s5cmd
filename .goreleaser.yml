@@ -19,8 +19,6 @@ builds:
 archives:
   - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
     replacements:
-      darwin: macOS
-      linux: Linux
       windows: Windows
       386: 32bit
       amd64: 64bit
@@ -54,20 +52,6 @@ brews:
     license: MIT
     test: |
       system "#{bin}/s5cmd version"
-
-nfpms:
-  -
-    vendor: Peak
-    homepage: https://github.com/peak/s5cmd
-    license: MIT
-    maintainer: Peak <packaging@peak.com>
-    description: |-
-      Very fast S3 and local filesystem execution tool. It comes with support
-      for a multitude of operations including tab completion and wildcard
-      support for files, which can be very handy for your object storage
-      workflow while working with large number of files.
-    formats:
-      - deb
 
 release:
   draft: true
