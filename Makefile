@@ -9,7 +9,7 @@ LDFLAGS=-ldflags "-X=github.com/peak/s5cmd/version.Version=$(VERSION) -X=github.
 
 .PHONY: build
 build:
-	@go build ${GCFLAGS} ${LDFLAGS} -mod=vendor .
+	@GOOS=windows GOARCH=amd64 go build ${GCFLAGS} ${LDFLAGS} -mod=vendor .
 
 TEST_TYPE:=test_with_race
 ifeq ($(OS),Windows_NT)

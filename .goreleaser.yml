@@ -1,9 +1,6 @@
 before:
   hooks:
     - make build
-  env:
-    - GOOS=windows
-    - GOARCH=amd64
 
 builds:
   -
